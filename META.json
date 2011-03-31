@@ -55,6 +55,6 @@
          "web" : "http://github.com/pnu/Plack-Middleware-Image-Scale"
       }
    },
-   "version" : "0.001"
+   "version" : "0.002"
 }
 

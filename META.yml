@@ -34,4 +34,4 @@ requires:
   Try::Tiny: 0
 resources:
   repository: git://github.com/pnu/Plack-Middleware-Image-Scale.git
-version: 0.001
+version: 0.002
