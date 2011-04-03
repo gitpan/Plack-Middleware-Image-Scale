@@ -6,7 +6,9 @@ META.yml
 Makefile.PL
 README
 dist.ini
-eg/app.psgi
+eg/example1.psgi
+eg/example2.psgi
+eg/images/foo.jpg
 lib/Plack/Middleware/Image/Scale.pm
 t/00_compile.t
 t/01_basic.t
