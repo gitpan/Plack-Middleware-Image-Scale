@@ -1,7 +1,7 @@
 use strict;
 package Plack::Middleware::Image::Scale;
 BEGIN {
-  $Plack::Middleware::Image::Scale::VERSION = '0.004';
+  $Plack::Middleware::Image::Scale::VERSION = '0.005';
 }
 # ABSTRACT: Resize jpeg and png images on the fly
 
@@ -71,7 +71,6 @@ has flags => (
     default => undef
 );
 
-
 sub call {
     my ($self,$env) = @_;
 
@@ -117,6 +116,7 @@ sub fetch_orig {
 }
 
 
+
 sub body_scaler {
     my $self = shift;
     my @args = @_;
@@ -146,8 +146,10 @@ sub body_scaler {
 
 sub image_scale {
     my ($self, $bufref, $ct, $width, $height, $flags) = @_;
-    my %flag = map { (split /(?<=\w)(?=\d)/, $_, 2)[0,1]; }
-        split '-', $flags || '';
+
+    ## $flags can be a HashRef, or it's parsed as a string
+    my %flag = 'HASH' eq ref $flags ? %{ $flags } :
+    map { (split /(?<=\w)(?=\d)/, $_, 2)[0,1]; } split '-', $flags || '';
 
     $width  = $self->width      if defined $self->width;
     $height = $self->height     if defined $self->height;
@@ -224,7 +226,7 @@ Plack::Middleware::Image::Scale - Resize jpeg and png images on the fly
 
 =head1 VERSION
 
-version 0.004
+version 0.005
 
 =head1 SYNOPSIS
 
@@ -258,7 +260,59 @@ original, scale it to 40x40 px size and convert to PNG format.
 A request to /thumbs/foo_x.png will use images/foo.(png|jpg|gif) as original,
 scale it small enough to fit 200x100 px size, fill extra borders (top/down or
 left/right, depending on the original image aspect ratio) with cyan
-background, and convert to PNG format. Also clipping is available, see below.
+background, and convert to PNG format. Also clipping is available, see
+L</CONFIGURATION>.
+
+    ## example3.psgi
+
+    my %imagesize = Config::General->new('imagesize.conf')->getall;
+
+    builder {
+        enable 'ConditionalGET';
+        enable 'Image::Scale', path => sub {
+            s{^(.+)_(.+)\.(jpg|png)$}{$1.$3} || return;
+            ( my %entry = %{$imagesize{$2} || {}} ) || return;
+            return delete @entry{'width','height'}, \%entry;
+        };
+        enable 'Static', path => qr{^/images/};
+        $app;
+    };
+
+A request to /images/foo_medium.png will use images/foo.(png|jpg|gif) as
+original. The size and flags are taken from the configuration file as
+parsed by Config::General.
+
+    ## imagesize.conf
+
+    <medium>
+        width   200
+        height  100
+        crop
+    </medium>
+    <big>
+        width   300
+        height  100
+        crop
+    </big>
+    <thumbred>
+        width   50
+        height  100
+        fill    ff0000
+    </thumbred>
+
+But you might want to use a simple config format, for example:
+
+    $imagesize = {
+        small  => [  10,  10 ],
+        medium => [  50,  50 ],
+        big    => [ 100, 100, 'crop']
+    };
+
+    # [...]
+    enable 'Image::Scale', path => sub {
+        s{^(.+)_(.+)e.(jpg|png)$}{$1.$3} || return;
+        return @{ $imgsizes->{$2} || [] };
+    };
 
 =head1 DESCRIPTION
 
@@ -280,9 +334,86 @@ original image is fetched from next middleware layer or application with a
 normal PSGI request. You can use L<Plack::Middleware::Static>, or
 L<Catalyst::Plugin::Static::Simple> for example.
 
-See below for various size/format specifications that can be used
+See L</CONFIGURATION> for various size/format specifications that can be used
 in the request URI, and L</ATTRIBUTES> for common configuration options
 that you can give as named parameters to the C<enable>.
+
+=head1 ATTRIBUTES
+
+=head2 match
+
+Only matching URIs are processed with this module. The match is done against
+L<PATH_INFO|PSGI/The_Environment>.  Non-matching requests are delegated to the
+next middleware layer or application.
+
+Must be a L<RegexpRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
+or L<CodeRef|Moose::Util::TypeConstraints/Default_Type_Constraints>, that may
+return 3 values (regexp captures or normal return values). The request path is
+passed to the CodeRef in C<$_>, and can be rewritten during match. This is used
+to strip off the image parameters from the URI. Rewritten URI is used for
+fetching the original image. Empty array means no match.
+
+First and second captures are the desired width and height of the
+resulting image. Third capture is an optional flag string. See
+L</CONFIGURATION>.
+
+=head2 orig_ext
+
+L<ArrayRef|Moose::Util::TypeConstraints/Default_Type_Constraints>
+of possible original image formats. See L</fetch_orig>.
+
+=head2 memory_limit
+
+Memory limit for the image scaling in bytes, as defined in
+L<Image::Scale|Image::Scale/resize(_\%OPTIONS_)>.
+
+=head2 jpeg_quality
+
+JPEG quality, as defined in
+L<Image::Scale|Image::Scale/as_jpeg(_[_$QUALITY_]_)>.
+
+=head2 width
+
+Use this to set and override image width.
+
+=head2 height
+
+Use this to set and override image height.
+
+=head2 flags
+
+Use this to set and override image processing flags.
+
+=head1 METHODS
+
+=head2 fetch_orig
+
+Call parameters: PSGI request HashRef $env, Str $basename.
+Return value: PSGI response ArrayRef $res.
+
+The original image is fetched from the next layer or application.  All
+possible extensions defined in L</orig_ext> are tried in order, to search for
+the original image. All other responses except a straight 404 (as returned by
+L<Plack::Middleware::Static> for example) are considered matches.
+
+=head2 body_scaler
+
+Call parameters: @args. Return value: CodeRef $cb.
+
+Create the content filter callback and return a CodeRef to it. The filter will
+buffer the data and call L</image_scale> with parameters C<@args> when EOF is
+received, and finally return the converted data.
+
+=head2 image_scale
+
+Call parameters: ScalarRef $buffer, String $ct, Int $width, Int $height, HashRef|Str $flags.
+Return value: $imagedata
+
+Read image from $buffer, scale it to $width x $height and
+return as content-type $ct. Optional $flags to specify image processing
+options like background fills or cropping. $flags can be a HashRef or 
+
+=head1 CONFIGURATION
 
 The default match pattern for URI is
 "I<...>I<basename>_I<width>xI<height>-I<flags>.I<ext>".
@@ -320,8 +451,6 @@ fill the requested image size exactly.
 If fill has a value, it specifies the background color to use. Undefined color
 with png output means transparent background.
 
-    /images/foo_40x20-fill0xff0000.png  ## red background
-
 =head2 flags: crop
 
 Image aspect ratio is preserved by scaling and cropping from middle of the
@@ -336,94 +465,6 @@ and does not change the crop size. Image is always cropped to the specified
 pixel width, height or both.
 
     /images/foo_40x-crop-z20.png
-
-=head1 ATTRIBUTES
-
-=head2 match
-
-Only matching URIs are processed with this module. The match is done against
-L<PATH_INFO|PSGI/The_Environment>.  Non-matching requests are delegated to the
-next middleware layer or application.
-
-Must be a L<RegexpRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
-or L<CodeRef|Moose::Util::TypeConstraints/Default_Type_Constraints>, that may
-return 3 values (regexp captures or normal return values). The request path is
-passed to the CodeRef in C<$_>, and can be rewritten during match. This is used
-to strip off the image parameters from the URI. Rewritten URI is used for
-fetching the original image.
-
-First and second captures are the desired width and height of the
-resulting image. Third capture is an optional flag string. See
-L</DESCRIPTION>.
-
-=head2 orig_ext
-
-L<ArrayRef|Moose::Util::TypeConstraints/Default_Type_Constraints>
-of possible original image formats. See L</fetch_orig>.
-
-=head2 memory_limit
-
-Memory limit for the image scaling in bytes, as defined in
-L<Image::Scale|Image::Scale/resize(_\%OPTIONS_)>.
-
-=head2 jpeg_quality
-
-JPEG quality, as defined in
-L<Image::Scale|Image::Scale/as_jpeg(_[_$QUALITY_]_)>.
-
-=head2 width
-
-Use this to set and override image width.
-
-=head2 height
-
-Use this to set and override image height.
-
-=head2 flags
-
-Use this to set and override image processing flags.
-
-=head1 METHODS
-
-=head2 call
-
-Process the request. The original image is fetched from the backend if
-L</path> match as specified. Normally you should use
-L<Plack::Middleware::Static> or similar backend, that returns a filehandle or
-otherwise delayed body. Content-Type of the response is set according the
-request.
-
-The body of the response is replaced with a
-L<streaming body|PSGI/Delayed_Reponse_and_Streaming_Body>
-that implements a content filter to do the actual resizing for the original
-body. This means that if response body gets discarded due to header validation
-(If-Modified-Since or If-None-Match for example), the body never needs to be
-processed.
-
-However, if the original image has been modified, for example the modification
-date has been changed, the streaming body gets passed to the HTTP server
-(or another middleware layer that needs to read it in), and the conversion
-happens.
-
-=head2 fetch_orig
-
-The original image is fetched from the next layer or application.  All
-possible extensions defined in L</orig_ext> are used in order, to search for
-the original image. All other responses except a straight 404 (as returned by
-L<Plack::Middleware::Static> for example) are considered matches.
-
-=head2 body_scaler
-
-Create a content filter callback to do the conversion with specified arguments.
-The callback binds to a closure with a buffer and the image_scale arguments.
-The callback will buffer the response and call L</image_scale> after an EOF.
-
-=head2 image_scale
-
-Do the actual scaling and cropping of the image.
-Arguments are width, height and flags, as parsed in L</call>.
-
-See L</DESCRIPTION> for description of various sizes and flags.
 
 =head1 CAVEATS
 
