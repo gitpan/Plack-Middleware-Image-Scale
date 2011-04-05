@@ -1,7 +1,7 @@
 use strict;
 package Plack::Middleware::Image::Scale;
 BEGIN {
-  $Plack::Middleware::Image::Scale::VERSION = '0.005';
+  $Plack::Middleware::Image::Scale::VERSION = '0.006';
 }
 # ABSTRACT: Resize jpeg and png images on the fly
 
@@ -18,22 +18,22 @@ extends 'Plack::Middleware';
 
 
 has path => (
-    is => 'rw', lazy => 1, isa => 'RegexpRef|CodeRef',
+    is => 'rw', lazy => 1, isa => 'RegexpRef|CodeRef|HashRef|Undef',
     builder => '_path_builder'
 );
 
-sub _path_builder { sub {
-    s{
-        \A
-        (.+)                    # $1 basename
-        _((\d+))?               # $3 width
-        x((\d+))?               # $5 height
-        (-( .+))?               # $7 flags
-        (?=\.(png|jpg|jpeg)\z)  # look-ahead: .<ext>\z
-    }{$1}x || return;
+sub _path_builder {
+    sub {
+        s{^(.+)_(.+)(?=\.(png|jpg|jpeg)$)}{$1}x || return;
+        return $2;
+    }
+}
 
-    return $3, $5, $7;
-} }
+
+has size => (
+    is => 'rw', lazy => 1, isa => 'RegexpRef|CodeRef|HashRef|Undef',
+    default => sub { qr{^(\d+)?x(\d+)?(?:-(.+))?$} }
+);
 
 
 has orig_ext => (
@@ -49,44 +49,37 @@ has memory_limit => (
 
 
 has jpeg_quality => (
-    is => 'rw', lazy => 1, isa => 'Maybe[Int]',
+    is => 'rw', lazy => 1, isa => 'Int|Undef',
     default => undef
 );
 
 
 has width => (
-    is => 'rw', lazy => 1, isa => 'Maybe[Int]',
+    is => 'rw', lazy => 1, isa => 'Int|Undef',
     default => undef
 );
 
 
 has height => (
-    is => 'rw', lazy => 1, isa => 'Maybe[Int]',
+    is => 'rw', lazy => 1, isa => 'Int|Undef',
     default => undef
 );
 
 
 has flags => (
-    is => 'rw', lazy => 1, isa => 'Maybe[HashRef]',
+    is => 'rw', lazy => 1, isa => 'HashRef|Undef',
     default => undef
 );
 
 sub call {
     my ($self,$env) = @_;
 
-    my $path = $env->{PATH_INFO};
-    my $path_match = $self->path;
-    my @match;
+    my $path = $env->{PATH_INFO}; 
+    my ($size) = _match($path,$self->path);
+    return $self->app->($env) unless defined $size;
 
-    ## Check that uri matches and extract the pieces, or pass thru
-    ## Topicalize $path (make $_ an alias to it) for callback.
-    for ( $path ) {
-        @match = 'CODE' eq ref $path_match ? $path_match->($_) :
-                       defined $path_match ? $_ =~ $path_match : undef;
-    }
-
-    return $self->app->($env) unless @match;
-    my ($width,$height,$flags) = @match;
+    my @param = _unroll(_match($size,$self->size));
+    return $self->app->($env) unless @param;
 
     ## Remove and extract the file extension
     $path =~ s/\.(\w+)$//; my $ext = $1;
@@ -99,8 +92,38 @@ sub call {
         my $res = shift;
         my $ct = Plack::MIME->mime_type(".$ext");
         Plack::Util::header_set( $res->[1], 'Content-Type', $ct );
-        return $self->body_scaler( $ct, $width, $height, $flags );
+        return $self->body_scaler( $ct, @param );
     });
+}
+
+## Helper for matching a Scalar value against CodeRef, HashRef
+## or RegexpRef. The first argument may be modified during match.
+sub _match {
+    my @match;
+    for ( $_[0] ) {
+        my $match = $_[1];
+        @match = 'CODE' eq ref $match ? $match->($_) :
+                 'HASH' eq ref $match ? $match->{$_} :
+                       defined $match ? $_ =~ $match : undef;
+    }
+    return @match;
+}
+
+## Helper for extracting (width,height,flags) from
+## HashRef or ArrayRef.
+sub _unroll {
+    return unless @_;
+    for ( $_[0] ) {
+        ## Config::General style hash of hashrefs.
+        if ( ref eq 'HASH' ) {
+            my %e = %{$_};
+            return (delete @e{'width','height'}, \%e);
+        ## Manual config friendly hash of arraysrefs.
+        } elsif ( ref eq 'ARRAY' ) {
+            return @{$_};
+        }
+    }
+    return @_;
 }
 
 
@@ -226,7 +249,7 @@ Plack::Middleware::Image::Scale - Resize jpeg and png images on the fly
 
 =head1 VERSION
 
-version 0.005
+version 0.006
 
 =head1 SYNOPSIS
 
@@ -263,20 +286,13 @@ left/right, depending on the original image aspect ratio) with cyan
 background, and convert to PNG format. Also clipping is available, see
 L</CONFIGURATION>.
 
-    ## example3.psgi
+    ## see example4.psgi
 
     my %imagesize = Config::General->new('imagesize.conf')->getall;
-
-    builder {
-        enable 'ConditionalGET';
-        enable 'Image::Scale', path => sub {
-            s{^(.+)_(.+)\.(jpg|png)$}{$1.$3} || return;
-            ( my %entry = %{$imagesize{$2} || {}} ) || return;
-            return delete @entry{'width','height'}, \%entry;
-        };
-        enable 'Static', path => qr{^/images/};
-        $app;
-    };
+    
+    # ...
+    
+    enable 'Image::Scale', size => \%imagesize;
 
 A request to /images/foo_medium.png will use images/foo.(png|jpg|gif) as
 original. The size and flags are taken from the configuration file as
@@ -300,19 +316,19 @@ parsed by Config::General.
         fill    ff0000
     </thumbred>
 
-But you might want to use a simple config format, for example:
+But you might want to use a simple config format if writing it in-line.
 
-    $imagesize = {
-        small  => [  10,  10 ],
-        medium => [  50,  50 ],
-        big    => [ 100, 100, 'crop']
+    ## see example3.psgi
+
+    my $imagesize = {
+        small   => [ 40,100],
+        medium  => [140,200],
+        big     => [240,300],
     };
 
-    # [...]
-    enable 'Image::Scale', path => sub {
-        s{^(.+)_(.+)e.(jpg|png)$}{$1.$3} || return;
-        return @{ $imgsizes->{$2} || [] };
-    };
+    # ...
+
+    enable 'Image::Scale', size => $imagesize;
 
 =head1 DESCRIPTION
 
@@ -322,10 +338,9 @@ is done with L<Image::Scale>.
 
 The original image is not modified or even accessed directly by this module.
 The converted image is not cached, but the request can be validated
-(If-Modified-Since) against original image without doing the image processing,
-or even reading the file content from the filesystem. This middleware should
-be used together a cache proxy, that caches the converted images for all
-clients, and implements content validation.
+(If-Modified-Since) against original image without doing the image processing.
+This middleware should be used together a cache proxy, that caches the
+converted images for all clients, and implements content validation.
 
 The response headers (like Last-Modified or ETag) are from the original image,
 but body is replaced with a PSGI L<content
@@ -336,26 +351,39 @@ L<Catalyst::Plugin::Static::Simple> for example.
 
 See L</CONFIGURATION> for various size/format specifications that can be used
 in the request URI, and L</ATTRIBUTES> for common configuration options
-that you can give as named parameters to the C<enable>.
+that you can use when constructing the middleware.
 
 =head1 ATTRIBUTES
 
 =head2 match
 
-Only matching URIs are processed with this module. The match is done against
-L<PATH_INFO|PSGI/The_Environment>.  Non-matching requests are delegated to the
-next middleware layer or application.
+Must be a L<RegexpRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
+C<CodeRef>, C<HashRef> or C<Undef>.
+
+The L<PATH_INFO|PSGI/The_Environment> is compared against this value to
+extract the size parameter for image processing. Undef means match always.
+C<PATH_INFO> is topicalized by settings it to C<$_>, and it may be rewritten
+during the match. The rewritten path is used for fetching the original image.
+
+The return value is evaluated in array context and may contain one element,
+the size.  Returning an empty array means no match. Non-matching requests are
+delegated to the next middleware layer or application.
+
+=head2 size
 
 Must be a L<RegexpRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
-or L<CodeRef|Moose::Util::TypeConstraints/Default_Type_Constraints>, that may
-return 3 values (regexp captures or normal return values). The request path is
-passed to the CodeRef in C<$_>, and can be rewritten during match. This is used
-to strip off the image parameters from the URI. Rewritten URI is used for
-fetching the original image. Empty array means no match.
+C<CodeRef>, C<HashRef> or C<Undef>.
 
-First and second captures are the desired width and height of the
-resulting image. Third capture is an optional flag string. See
-L</CONFIGURATION>.
+The C<size> extracted by L</path> match is compared against this value to
+extract width, height and flags for image processing. Undef means match
+always.
+
+The return value is evaluated in array context and may contain three elements;
+width, height and flags. Returning an empty array means no match. Non-matching
+requests are delegated to the next middleware layer or application.
+
+Optionally an array or hash reference can be returned. Keys C<width>,
+C<height> and flags as an hash reference will be unrolled from a hash reference.
 
 =head2 orig_ext
 
@@ -398,7 +426,7 @@ L<Plack::Middleware::Static> for example) are considered matches.
 
 =head2 body_scaler
 
-Call parameters: @args. Return value: CodeRef $cb.
+Call parameters: @args. Return value: PSGI content filter CodeRef $cb.
 
 Create the content filter callback and return a CodeRef to it. The filter will
 buffer the data and call L</image_scale> with parameters C<@args> when EOF is
@@ -411,23 +439,18 @@ Return value: $imagedata
 
 Read image from $buffer, scale it to $width x $height and
 return as content-type $ct. Optional $flags to specify image processing
-options like background fills or cropping. $flags can be a HashRef or 
+options like background fills or cropping.
 
 =head1 CONFIGURATION
 
 The default match pattern for URI is
-"I<...>I<basename>_I<width>xI<height>-I<flags>.I<ext>".
+"I<...>_I<width>xI<height>-I<flags>.I<ext>".
 
 If URI doesn't match, the request is passed through. Any number of flags can
 be specified, separated with C<->.  Flags can be boolean (exists or doesn't
 exist), or have a numerical value. Flag name and value are separated with a
 zero-width word to number boundary. For example C<z20> specifies flag C<z>
 with value C<20>.
-
-=head2 basename
-
-Original image is requested from URI I<basename>.I<orig_ext>, where
-I<orig_ext> is list of filename extensions. See L</orig_ext>.
 
 =head2 width
 
@@ -459,17 +482,16 @@ preserve the aspect ratio, and then cropping to the exact size.
 
 =head2 flags: z
 
-Zoom the specified width or height N percent bigger. For example C<z20> to
-zoom 20%. The zooming applies only to width and/or height defined in the URI,
-and does not change the crop size. Image is always cropped to the specified
-pixel width, height or both.
+Zoom the original image N percent bigger. For example C<z20> to zoom 20%.
+Zooming applies only to explicitly defined width and/or height, and it does
+not change the crop size.
 
-    /images/foo_40x-crop-z20.png
+    /images/foo_40x-z20.png
 
 =head1 CAVEATS
 
 The cropping requires L<Imager>. This is a run-time dependency, and
-fallback is not to crop the image to the desired size.
+fallback is not to crop the image to the expected size.
 
 =head1 SEE ALSO
 

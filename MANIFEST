@@ -9,6 +9,7 @@ dist.ini
 eg/example1.psgi
 eg/example2.psgi
 eg/example3.psgi
+eg/example4.psgi
 eg/images/foo.jpg
 eg/imagesize.conf
 lib/Plack/Middleware/Image/Scale.pm
