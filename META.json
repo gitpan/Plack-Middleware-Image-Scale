@@ -4,7 +4,7 @@
       "Panu Ervamaa <pnu@cpan.org>"
    ],
    "dynamic_config" : 0,
-   "generated_by" : "Dist::Zilla version 4.200004, CPAN::Meta::Converter version 2.110580",
+   "generated_by" : "Dist::Zilla version 4.200004, CPAN::Meta::Converter version 2.110930",
    "license" : [
       "perl_5"
    ],
@@ -34,6 +34,7 @@
       },
       "test" : {
          "requires" : {
+            "Data::Dumper" : 0,
             "English" : 0,
             "File::Slurp" : 0,
             "HTTP::Request::Common" : 0,
@@ -55,6 +56,7 @@
          "web" : "http://github.com/pnu/Plack-Middleware-Image-Scale"
       }
    },
-   "version" : "0.006"
+   "version" : "0.007",
+   "x_authority" : "cpan:PNU"
 }
 

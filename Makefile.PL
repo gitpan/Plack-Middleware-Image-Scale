@@ -12,6 +12,7 @@ my %WriteMakefileArgs = (
   'ABSTRACT' => 'Resize jpeg and png images on the fly',
   'AUTHOR' => 'Panu Ervamaa <pnu@cpan.org>',
   'BUILD_REQUIRES' => {
+    'Data::Dumper' => '0',
     'English' => '0',
     'File::Slurp' => '0',
     'HTTP::Request::Common' => '0',
@@ -41,7 +42,7 @@ my %WriteMakefileArgs = (
     'Plack::Util' => '0',
     'Try::Tiny' => '0'
   },
-  'VERSION' => '0.006',
+  'VERSION' => '0.007',
   'test' => {
     'TESTS' => 't/*.t'
   }

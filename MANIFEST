@@ -16,11 +16,16 @@ lib/Plack/Middleware/Image/Scale.pm
 t/00_compile.t
 t/01_basic.t
 t/02_responsetypes.t
+t/03_invalid.t
+t/04_size.t
+t/05_format.t
+t/10_args.t
 t/author-critic.t
 t/author-pod-spell.t
 t/images/100x100.png
 t/images/50x50.gif
 t/images/75x75.jpg
+t/lib/Test/Invocation/Arguments.pm
 t/release-check-changes.t
 t/release-kwalitee.t
 t/release-no-tabs.t

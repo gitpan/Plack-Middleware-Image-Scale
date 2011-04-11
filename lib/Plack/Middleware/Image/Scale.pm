@@ -1,7 +1,10 @@
 use strict;
 package Plack::Middleware::Image::Scale;
 BEGIN {
-  $Plack::Middleware::Image::Scale::VERSION = '0.006';
+  $Plack::Middleware::Image::Scale::AUTHORITY = 'cpan:PNU';
+}
+BEGIN {
+  $Plack::Middleware::Image::Scale::VERSION = '0.007';
 }
 # ABSTRACT: Resize jpeg and png images on the fly
 
@@ -18,21 +21,26 @@ extends 'Plack::Middleware';
 
 
 has path => (
-    is => 'rw', lazy => 1, isa => 'RegexpRef|CodeRef|HashRef|Undef',
-    builder => '_path_builder'
+    is => 'rw', lazy => 1, isa => 'RegexpRef|CodeRef|Str|Undef',
+    default => undef
 );
 
-sub _path_builder {
-    sub {
-        s{^(.+)_(.+)(?=\.(png|jpg|jpeg)$)}{$1}x || return;
-        return $2;
-    }
-}
+
+has match => (
+    is => 'rw', lazy => 1, isa => 'RegexpRef|CodeRef',
+    default => sub { qr{^(.+?)(?:_([^_]+?))?(?:\.(jpe?g|png|image))$} }
+);
 
 
 has size => (
     is => 'rw', lazy => 1, isa => 'RegexpRef|CodeRef|HashRef|Undef',
     default => sub { qr{^(\d+)?x(\d+)?(?:-(.+))?$} }
+);
+
+
+has any_ext => (
+    is => 'rw', lazy => 1, isa => 'Str|Undef',
+    default => 'image'
 );
 
 
@@ -43,7 +51,7 @@ has orig_ext => (
 
 
 has memory_limit => (
-    is => 'rw', lazy => 1, isa => 'Int',
+    is => 'rw', lazy => 1, isa => 'Int|Undef',
     default => 10_000_000 # bytes
 );
 
@@ -73,38 +81,53 @@ has flags => (
 
 sub call {
     my ($self,$env) = @_;
+    my $path = $env->{PATH_INFO};
+    my @param;
 
-    my $path = $env->{PATH_INFO}; 
-    my ($size) = _match($path,$self->path);
-    return $self->app->($env) unless defined $size;
+    if ( defined $self->path ) {
+        my ($m) = _match($path,$self->path);
+        return $self->app->($env) unless $m;
+    }
 
-    my @param = _unroll(_match($size,$self->size));
-    return $self->app->($env) unless @param;
+    my @m = _match($path,$self->match);
+    return $self->app->($env) unless @m;
+    ($path, my $size, my $ext) = @m;
+    return $self->app->($env) unless $path and $ext;
 
-    ## Remove and extract the file extension
-    $path =~ s/\.(\w+)$//; my $ext = $1;
+    if ( defined $size ) {
+        @param = _unroll(_match($size,$self->size));
+        return $self->app->($env) unless @param;
+    }
 
     my $res = $self->fetch_orig($env,$path);
     return $self->app->($env) unless $res;
 
     ## Post-process the response with a body filter
-    Plack::Util::response_cb( $res, sub {
+    $self->response_cb( $res, sub {
         my $res = shift;
-        my $ct = Plack::MIME->mime_type(".$ext");
-        Plack::Util::header_set( $res->[1], 'Content-Type', $ct );
+        my $ct;
+        if ( defined $self->any_ext and $ext eq $self->any_ext ) {
+            $ct = Plack::Util::header_get( $res->[1], 'Content-Type' );
+        } else {
+            $ct = Plack::MIME->mime_type(".$ext");
+            Plack::Util::header_set( $res->[1], 'Content-Type', $ct );
+        }
         return $self->body_scaler( $ct, @param );
     });
 }
 
-## Helper for matching a Scalar value against CodeRef, HashRef
-## or RegexpRef. The first argument may be modified during match.
+## Helper for matching a Scalar value against CodeRef, HashRef,
+## RegexpRef or Str. The first argument may be modified during match.
 sub _match {
     my @match;
     for ( $_[0] ) {
         my $match = $_[1];
-        @match = 'CODE' eq ref $match ? $match->($_) :
-                 'HASH' eq ref $match ? $match->{$_} :
-                       defined $match ? $_ =~ $match : undef;
+        @match =
+          'CODE' eq ref $match ? $match->($_) :
+          'HASH' eq ref $match ? $match->{$_} :
+        'Regexp' eq ref $match ? $_ =~ $match :
+                defined $match ? (substr($_,0,length $match) eq $match ? ($match) : ()) :
+                                 undef;
     }
     return @match;
 }
@@ -137,7 +160,6 @@ sub fetch_orig {
     }
     return;
 }
-
 
 
 sub body_scaler {
@@ -188,7 +210,8 @@ sub image_scale {
 
     my $output;
     try {
-        my $img = Image::Scale->new($bufref);
+        my $img = Image::Scale->new($bufref)
+            or die 'Invalid data / image format not recognized';
 
         if ( exists $flag{crop} and defined $width and defined $height ) {
             my $ratio = $img->width / $img->height;
@@ -206,12 +229,13 @@ sub image_scale {
             defined $height ? (height => $height) : (),
             exists  $flag{fill} ? (keep_aspect => 1) : (),
             defined $flag{fill} ? (bgcolor => hex $flag{fill}) : (),
-            memory_limit => $self->memory_limit,
+            defined $self->memory_limit ?
+                (memory_limit => $self->memory_limit) : (),
         });
 
         $output = $ct eq 'image/jpeg' ? $img->as_jpeg($self->jpeg_quality || ()) :
                   $ct eq 'image/png'  ? $img->as_png :
-                  die "Conversion to $ct is not implemented";
+                  die "Conversion to '$ct' is not implemented";
     } catch {
         carp $_;
         return;
@@ -249,7 +273,7 @@ Plack::Middleware::Image::Scale - Resize jpeg and png images on the fly
 
 =head1 VERSION
 
-version 0.006
+version 0.007
 
 =head1 SYNOPSIS
 
@@ -280,7 +304,7 @@ original, scale it to 40x40 px size and convert to PNG format.
         mount '/' => $app;
     };
 
-A request to /thumbs/foo_x.png will use images/foo.(png|jpg|gif) as original,
+A request to /thumbs/foo.png will use images/foo.(png|jpg|gif) as original,
 scale it small enough to fit 200x100 px size, fill extra borders (top/down or
 left/right, depending on the original image aspect ratio) with cyan
 background, and convert to PNG format. Also clipping is available, see
@@ -316,19 +340,9 @@ parsed by Config::General.
         fill    ff0000
     </thumbred>
 
-But you might want to use a simple config format if writing it in-line.
-
-    ## see example3.psgi
-
-    my $imagesize = {
-        small   => [ 40,100],
-        medium  => [140,200],
-        big     => [240,300],
-    };
-
-    # ...
-
-    enable 'Image::Scale', size => $imagesize;
+For more examples, browse into directory
+L<eg|http://cpansearch.perl.org/src/PNU/> inside the distribution
+directory for this version.
 
 =head1 DESCRIPTION
 
@@ -355,35 +369,70 @@ that you can use when constructing the middleware.
 
 =head1 ATTRIBUTES
 
+=head2 path
+
+Must be a L<RegexpRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
+L<CodeRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
+L<Str|Moose::Util::TypeConstraints/Default_Type_Constraints> or
+L<Undef|Moose::Util::TypeConstraints/Default_Type_Constraints>.
+
+The L<PATH_INFO|PSGI/The_Environment> is compared against this value to
+evaluate if the request should be processed. Undef (the default) will match
+always.  C<PATH_INFO> is topicalized by settings it to C<$_>, and it may be
+rewritten during C<CodeRef> matching. Rewriting can be used to relocate image
+paths, much like C<path> parameter for L<Plack::Middleware::Static>.
+
+If path matches, next it will be compared against L</name>. If path doesn't
+match, the request will be delegated to the next middleware layer or
+application.
+
 =head2 match
 
 Must be a L<RegexpRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
-C<CodeRef>, C<HashRef> or C<Undef>.
+or L<CodeRef|Moose::Util::TypeConstraints/Default_Type_Constraints>.
 
-The L<PATH_INFO|PSGI/The_Environment> is compared against this value to
-extract the size parameter for image processing. Undef means match always.
-C<PATH_INFO> is topicalized by settings it to C<$_>, and it may be rewritten
-during the match. The rewritten path is used for fetching the original image.
+The L<PATH_INFO|PSGI/The_Environment>, possibly rewritten during L</path>
+matching, is compared against this value to extract C<name>, C<size>
+and C<ext>. The default value is:
 
-The return value is evaluated in array context and may contain one element,
-the size.  Returning an empty array means no match. Non-matching requests are
-delegated to the next middleware layer or application.
+    qr{^(.+)(?:_(.+?))?(?:\.(jpe?g|png|image))$}
+
+The expression is evaluated in array context and may return three elements:
+C<name>, C<size> and C<ext>. Returning an empty array means no match.
+Non-matching requests are delegated to the next middleware layer or
+application.
+
+If the path matches, the original image is fetched from C<name>.L</orig_ext>,
+scaled with parameters extracted from C<size> and converted to the content type
+defined by C<ext>. See also L</any_ext>.
 
 =head2 size
 
 Must be a L<RegexpRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
-C<CodeRef>, C<HashRef> or C<Undef>.
+L<CodeRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
+L<HashRef|Moose::Util::TypeConstraints/Default_Type_Constraints>,
+L<Undef|Moose::Util::TypeConstraints/Default_Type_Constraints>.
 
-The C<size> extracted by L</path> match is compared against this value to
-extract width, height and flags for image processing. Undef means match
-always.
+The C<size> extracted by L</match> is compared against this value to evaluate
+if the request should be processed, and to map it into width, height and flags
+for image processing. Undef will match always and use default width, height
+and flags as defined by the L</ATTRIBUTES>. The default value is:
 
-The return value is evaluated in array context and may contain three elements;
-width, height and flags. Returning an empty array means no match. Non-matching
-requests are delegated to the next middleware layer or application.
+    qr{^(\d+)?x(\d+)?(?:-(.+))?$}
 
-Optionally an array or hash reference can be returned. Keys C<width>,
-C<height> and flags as an hash reference will be unrolled from a hash reference.
+The expression is evaluated in array context and may return three elements;
+C<width>, C<height> and C<flags>. Returning an empty array means no match.
+Non-matching requests are delegated to the next middleware layer or
+application.
+
+Optionally a hash reference can be returned. Keys C<width>, C<height>, and any
+remaining keys as an hash reference, will be unrolled from the hash reference.
+
+=head2 any_ext
+
+If defined and request C<ext> is equal to this, the content type of the original
+image is used in the output. This means that the image format of the original
+image is preserved. Default is C<image>.
 
 =head2 orig_ext
 
