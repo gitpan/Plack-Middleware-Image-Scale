@@ -17,7 +17,7 @@ build_requires:
 configure_requires:
   ExtUtils::MakeMaker: 6.31
 dynamic_config: 0
-generated_by: 'Dist::Zilla version 4.200004, CPAN::Meta::Converter version 2.110930'
+generated_by: 'Dist::Zilla version 4.200004, CPAN::Meta::Converter version 2.110580'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -35,5 +35,5 @@ requires:
   Try::Tiny: 0
 resources:
   repository: git://github.com/pnu/Plack-Middleware-Image-Scale.git
-version: 0.007
+version: 0.008
 x_authority: cpan:PNU

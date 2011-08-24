@@ -4,7 +4,7 @@ BEGIN {
   $Plack::Middleware::Image::Scale::AUTHORITY = 'cpan:PNU';
 }
 BEGIN {
-  $Plack::Middleware::Image::Scale::VERSION = '0.007';
+  $Plack::Middleware::Image::Scale::VERSION = '0.008';
 }
 # ABSTRACT: Resize jpeg and png images on the fly
 
@@ -14,7 +14,7 @@ use Plack::Util;
 use Plack::MIME;
 use Try::Tiny;
 use Image::Scale;
-use List::Util qw( max );
+use List::Util qw( min max );
 use Carp;
 
 extends 'Plack::Middleware';
@@ -180,7 +180,7 @@ sub body_scaler {
         return if not defined $buffer;
 
         ## Process the buffer
-        my $img = $self->image_scale(\$buffer,@args);
+        my $img = $buffer ? $self->image_scale(\$buffer,@args) : '';
         undef $buffer;
         return $img;
     };
@@ -217,6 +217,10 @@ sub image_scale {
             my $ratio = $img->width / $img->height;
             $width  = max $width , $height * $ratio;
             $height = max $height, $width / $ratio;
+        } elsif ( exists $flag{fit} and defined $width and defined $height ) {
+            my $ratio = $img->width / $img->height;
+            $width  = min $width , $height * $ratio;
+            $height = min $height, $width / $ratio;
         }
 
         unless ( defined $width or defined $height ) {
@@ -238,7 +242,7 @@ sub image_scale {
                   die "Conversion to '$ct' is not implemented";
     } catch {
         carp $_;
-        return;
+        $output = $$bufref;
     };
 
     if ( defined $owidth  and $width  > $owidth or
@@ -254,7 +258,6 @@ sub image_scale {
             $crop->write( data => \$output, type => (split '/', $ct)[1] );
         } catch {
             carp $_;
-            return;
         };
     }
 
@@ -273,7 +276,7 @@ Plack::Middleware::Image::Scale - Resize jpeg and png images on the fly
 
 =head1 VERSION
 
-version 0.007
+version 0.008
 
 =head1 SYNOPSIS
 
@@ -528,6 +531,14 @@ with png output means transparent background.
 Image aspect ratio is preserved by scaling and cropping from middle of the
 image. This means scaling to the bigger of the two possible sizes that
 preserve the aspect ratio, and then cropping to the exact size.
+
+=head2 flags: fit
+
+Image aspect ratio is preserved by scaling the image to the smaller of the two
+possible sizes. This means that the resulting picture may have one dimension
+smaller than specified, but cropping or filling is avoided.
+
+See documentation in distribution directory C<doc> for a visual explanation.
 
 =head2 flags: z
 
