@@ -13,6 +13,8 @@ eg/example1.psgi
 eg/example2.psgi
 eg/example3.psgi
 eg/example4.psgi
+eg/example5.psgi
+eg/images/file1.pdf
 eg/images/foo.jpg
 eg/imagesize.conf
 lib/Plack/Middleware/Image/Scale.pm

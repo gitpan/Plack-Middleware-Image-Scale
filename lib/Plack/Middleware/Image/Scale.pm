@@ -3,8 +3,8 @@ package Plack::Middleware::Image::Scale;
 BEGIN {
   $Plack::Middleware::Image::Scale::AUTHORITY = 'cpan:PNU';
 }
-BEGIN {
-  $Plack::Middleware::Image::Scale::VERSION = '0.008';
+{
+  $Plack::Middleware::Image::Scale::VERSION = '0.009';
 }
 # ABSTRACT: Resize jpeg and png images on the fly
 
@@ -105,6 +105,7 @@ sub call {
     ## Post-process the response with a body filter
     $self->response_cb( $res, sub {
         my $res = shift;
+        my $orig_ct = Plack::Util::header_get( $res->[1], 'Content-Type' );
         my $ct;
         if ( defined $self->any_ext and $ext eq $self->any_ext ) {
             $ct = Plack::Util::header_get( $res->[1], 'Content-Type' );
@@ -112,7 +113,7 @@ sub call {
             $ct = Plack::MIME->mime_type(".$ext");
             Plack::Util::header_set( $res->[1], 'Content-Type', $ct );
         }
-        return $self->body_scaler( $ct, @param );
+        return $self->body_scaler( $ct, @param, $orig_ct );
     });
 }
 
@@ -190,7 +191,7 @@ sub body_scaler {
 
 
 sub image_scale {
-    my ($self, $bufref, $ct, $width, $height, $flags) = @_;
+    my ($self, $bufref, $ct, $width, $height, $flags, $orig_ct) = @_;
 
     ## $flags can be a HashRef, or it's parsed as a string
     my %flag = 'HASH' eq ref $flags ? %{ $flags } :
@@ -209,6 +210,28 @@ sub image_scale {
     }
 
     my $output;
+    if ($orig_ct eq 'application/pdf') {
+        try {
+            Class::MOP::load_class('Image::Magick::Thumbnail::PDF');
+            Class::MOP::load_class('File::Temp');
+            my $in = File::Temp->new( SUFFIX => '.pdf' );
+            my $out = File::Temp->new( SUFFIX => '.png' );
+            $in->write( $$bufref ); $in->close;
+            Image::Magick::Thumbnail::PDF::create_thumbnail(
+                $in->filename, $out->filename, $flag{p}||1, {
+                    frame => 0, normalize => 0,
+                    restriction => max($width, $height),
+                }
+            );
+            my $pdfdata;
+            $out->seek( 0, 0 );
+            $out->read( $pdfdata, 9999999 );
+            $bufref = \$pdfdata;
+        } catch {
+            carp $_;
+            $output = $$bufref;
+        };
+    }
     try {
         my $img = Image::Scale->new($bufref)
             or die 'Invalid data / image format not recognized';
@@ -266,8 +289,8 @@ sub image_scale {
 
 1;
 
-
 __END__
+
 =pod
 
 =head1 NAME
@@ -276,7 +299,7 @@ Plack::Middleware::Image::Scale - Resize jpeg and png images on the fly
 
 =head1 VERSION
 
-version 0.008
+version 0.009
 
 =head1 SYNOPSIS
 
@@ -573,4 +596,3 @@ This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut
-

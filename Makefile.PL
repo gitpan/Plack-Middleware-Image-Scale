@@ -4,47 +4,48 @@ use warnings;
 
 
 
-use ExtUtils::MakeMaker 6.31;
+use ExtUtils::MakeMaker 6.30;
 
 
 
 my %WriteMakefileArgs = (
-  'ABSTRACT' => 'Resize jpeg and png images on the fly',
-  'AUTHOR' => 'Panu Ervamaa <pnu@cpan.org>',
-  'BUILD_REQUIRES' => {
-    'Data::Dumper' => '0',
-    'English' => '0',
-    'File::Slurp' => '0',
-    'HTTP::Request::Common' => '0',
-    'HTTP::Response' => '0',
-    'IO::File' => '0',
-    'Imager' => '0',
-    'Plack::Builder' => '0',
-    'Plack::Middleware::Static' => '0',
-    'Plack::Test' => '0',
-    'Test::More' => '0'
+  "ABSTRACT" => "Resize jpeg and png images on the fly",
+  "AUTHOR" => "Panu Ervamaa <pnu\@cpan.org>",
+  "BUILD_REQUIRES" => {
+    "Data::Dumper" => 0,
+    "File::Slurp" => 0,
+    "HTTP::Request::Common" => 0,
+    "HTTP::Response" => 0,
+    "IO::File" => 0,
+    "Imager" => 0,
+    "Plack::Builder" => 0,
+    "Plack::Middleware::Static" => 0,
+    "Plack::Test" => 0,
+    "Test::More" => 0,
+    "warnings" => 0
   },
-  'CONFIGURE_REQUIRES' => {
-    'ExtUtils::MakeMaker' => '6.31'
+  "CONFIGURE_REQUIRES" => {
+    "ExtUtils::MakeMaker" => "6.30"
   },
-  'DISTNAME' => 'Plack-Middleware-Image-Scale',
-  'EXE_FILES' => [],
-  'LICENSE' => 'perl',
-  'NAME' => 'Plack::Middleware::Image::Scale',
-  'PREREQ_PM' => {
-    'Carp' => '0',
-    'Class::MOP' => '0',
-    'Image::Scale' => '0',
-    'List::Util' => '0',
-    'Moose' => '0',
-    'Plack::MIME' => '0',
-    'Plack::Middleware' => '0',
-    'Plack::Util' => '0',
-    'Try::Tiny' => '0'
+  "DISTNAME" => "Plack-Middleware-Image-Scale",
+  "EXE_FILES" => [],
+  "LICENSE" => "perl",
+  "NAME" => "Plack::Middleware::Image::Scale",
+  "PREREQ_PM" => {
+    "Carp" => 0,
+    "Class::MOP" => 0,
+    "Image::Scale" => 0,
+    "List::Util" => 0,
+    "Moose" => 0,
+    "Plack::MIME" => 0,
+    "Plack::Middleware" => 0,
+    "Plack::Util" => 0,
+    "Try::Tiny" => 0,
+    "strict" => 0
   },
-  'VERSION' => '0.008',
-  'test' => {
-    'TESTS' => 't/*.t'
+  "VERSION" => "0.009",
+  "test" => {
+    "TESTS" => "t/*.t"
   }
 );
 
